@@ -1,5 +1,7 @@
 # ComicK panels
 
+Repo: <https://github.com/VashTetr/Comick-Panels>
+
 Unpacked Manifest V3 extension for Chrome and Brave. On a [comick.dev](https://comick.dev) or [comick.live](https://comick.live) chapter it looks up the same chapter on other sites and draws those pages in the ComicK reader.
 
 Nothing else has to be installed. There is no app, no Java process, and no build step.
@@ -47,7 +49,7 @@ Reload the chapter tab after you reload the extension. Chrome drops the old cont
 
 `parsers/template/` is not imported. A source only runs after it is listed in `index.js`.
 
-If you want a site added and don't want to write the parser, open an issue with the site URL. I'll probably add it.
+If you want a site added and don't want to write the parser, [open an issue](https://github.com/VashTetr/Comick-Panels/issues) with the site URL. I'll probably add it.
 
 ## Layout
 
