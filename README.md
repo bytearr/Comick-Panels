@@ -33,7 +33,7 @@ Reload the chapter tab after you reload the extension. Chrome drops the old cont
 
 ## Limits
 
-- The ComicK title has to match a source title closely. A miss is remembered for that series until you clear the extension's site data under `chrome://extensions`.
+- The chapter title is searched first. If that misses, the other names from the ComicK series page are tried. A miss is remembered for that series until you clear the extension's site data under `chrome://extensions`.
 - Chapter `0` and prologues are skipped. `12.5` matches `12.5` only.
 - MangaDex image URLs expire. If those pages stop loading, clear the extension's stored data and open the chapter again.
 - FlameComics and MangaK change their page markup. A source that fails is skipped. The others still run.

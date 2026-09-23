@@ -25,6 +25,32 @@ function pageTitle() {
   return (match && match[1].trim()) || fromHeading || "";
 }
 
+function plain(html) {
+  const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+  return (doc.body.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+async function seriesTitles(slug) {
+  try {
+    const response = await fetch(`${location.origin}/comic/${encodeURIComponent(slug)}`, {
+      credentials: "same-origin",
+      headers: { accept: "text/html" },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!response.ok) return [];
+    const html = await response.text();
+    const names = [];
+    const h1 = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/);
+    if (h1) names.push(plain(h1[1]));
+    const h2 = html.match(/<h1\b[^>]*>[\s\S]*?<\/h1>\s*<h2\b[^>]*>([\s\S]*?)<\/h2>/);
+    if (h2) names.push(plain(h2[1]));
+    for (const match of html.matchAll(/data-title-text="true">([^<]*)/g)) names.push(plain(match[1]));
+    return names.filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 function readerRoot() {
   return document.getElementById("images-reader-container");
 }
@@ -159,7 +185,7 @@ function schedule() {
   }
   const mine = ++token;
   const started = Date.now();
-  const timer = setInterval(() => {
+  const timer = setInterval(async () => {
     if (mine !== token) {
       clearInterval(timer);
       return;
@@ -179,13 +205,15 @@ function schedule() {
     clearInterval(timer);
     waitingFor = chapter;
     requested = chapter;
+    const titles = await seriesTitles(slug);
+    if (mine !== token) return;
     port = chrome.runtime.connect({ name: "find" });
     port.onMessage.addListener((message) => {
       if (mine !== token || !message) return;
       if (message.type === "hit") addHit(message.hit);
       if (message.type === "error") showError(message.error);
     });
-    port.postMessage({ slug, title, chapter });
+    port.postMessage({ slug, title, titles, chapter });
   }, 300);
 }
 

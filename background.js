@@ -1,4 +1,4 @@
-import { sameChapter, scoreTitle } from "./match.js";
+import { sameChapter, scoreTitle, titleWords } from "./match.js";
 import { sources } from "./parsers/index.js";
 
 const MIN_SCORE = 75;
@@ -70,6 +70,7 @@ async function persist(cache) {
   await chrome.storage.local.set({
     ["manga:" + cache.slug]: {
       title: cache.title,
+      titles: cache.titles || [],
       entries,
       misses: [...cache.misses]
     }
@@ -85,6 +86,7 @@ async function cacheFor(slug, title) {
   const cache = {
     slug,
     title: title || "",
+    titles: [],
     entries: new Map(),
     misses: new Set(),
     scanning: false,
@@ -94,6 +96,7 @@ async function cacheFor(slug, title) {
   const saved = stored["manga:" + slug];
   if (saved) {
     cache.title = title || saved.title || "";
+    cache.titles = Array.isArray(saved.titles) ? saved.titles : [];
     for (const [id, entry] of saved.entries || []) cache.entries.set(id, entry);
     for (const id of saved.misses || []) cache.misses.add(id);
   }
@@ -151,22 +154,56 @@ function scoreManga(query, manga) {
   return names.reduce((best, name) => Math.max(best, scoreTitle(query, name)), 0);
 }
 
-async function learn(source, title) {
-  const searched = await source.search(title);
-  const ranked = (searched || [])
-    .map((manga) => ({ manga, score: scoreManga(title, manga) }))
-    .filter((row) => row.score >= MIN_SCORE)
-    .sort((a, b) => b.score - a.score);
-  const best = ranked[0];
-  if (!best) return null;
-  const manga = await source.details(best.manga);
-  if (!manga || !manga.chapters) return null;
-  return {
-    manga,
-    chapters: manga.chapters,
-    pages: {},
-    label: source.label || source.id
-  };
+function searchQueries(title, titles) {
+  const seen = new Set();
+  const queries = [];
+  for (const name of [title, ...(titles || [])]) {
+    const clean = String(name || "").replace(/\s+/g, " ").trim();
+    const key = clean.toLowerCase();
+    if (!clean || seen.has(key) || !titleWords(clean).length) continue;
+    seen.add(key);
+    queries.push(clean);
+    if (queries.length >= 8) break;
+  }
+  return queries;
+}
+
+async function learn(source, queries) {
+  let failed = 0;
+  for (const query of queries) {
+    let searched;
+    try {
+      searched = await source.search(query);
+    } catch {
+      failed += 1;
+      continue;
+    }
+    const ranked = (searched || [])
+      .map((manga) => ({ manga, score: scoreManga(query, manga) }))
+      .filter((row) => row.score >= MIN_SCORE)
+      .sort((a, b) => b.score - a.score);
+    const best = ranked[0];
+    if (!best) continue;
+    const manga = await source.details(best.manga);
+    if (!manga || !manga.chapters) continue;
+    return {
+      manga,
+      chapters: manga.chapters,
+      pages: {},
+      label: source.label || source.id
+    };
+  }
+  if (failed === queries.length && queries.length) throw new Error("search failed");
+  return null;
+}
+
+async function useTitles(cache, titles) {
+  const next = Array.isArray(titles) ? titles : [];
+  const before = searchQueries(cache.title, cache.titles).join("\n");
+  cache.titles = next;
+  if (before === searchQueries(cache.title, cache.titles).join("\n")) return;
+  cache.misses.clear();
+  await persist(cache);
 }
 
 async function scan(cache) {
@@ -178,7 +215,7 @@ async function scan(cache) {
       if (cache.entries.has(source.id) || cache.misses.has(source.id)) return;
       let learned = null;
       try {
-        learned = await learn(source, cache.title);
+        learned = await learn(source, searchQueries(cache.title, cache.titles));
       } catch {
         return;
       }
@@ -223,6 +260,7 @@ chrome.runtime.onConnect.addListener((port) => {
     try {
       if (!message || !message.slug || message.chapter == null) return;
       const cache = await cacheFor(message.slug, message.title);
+      await useTitles(cache, message.titles);
       const reader = { port, chapter: message.chapter };
       cache.readers.add(reader);
       port.onDisconnect.addListener(() => cache.readers.delete(reader));
