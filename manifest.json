@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "ComicK panels",
+  "version": "0.5.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAn6KD0XaZiMt6WQB7IJdxltXtpXE8q5AeeKnIWQEfqhZyzVMrurokLMq3HiILtG+ostt0Ogtmgb2IYUVEmoJpS7w01HQ8YUBplHdwWJKe+FwxJIR3rIRNBPJ/PrgkZ7517pHf2FHjo4kO7t54HqQgKDuvGrumFZgVWXK6+asTjQVulKABfOP5Hi5YbtqgtBM32dBPtP1lqj4ubeEW2+CRnQIObHj6Y7qrj/TKNSlviTB8We1omRmUs+8xm6EqFp7+PSZbSiO/HZjMBx9UELgMk748EdUvDw0gTvKQ2dyKpNin7iX2e2nmup/JJ9ay+M/F9TpFPPCP82up6zL+VL4LqwIDAQAB",
+  "description": "Loads this chapter from local hosters into the ComicK reader.",
+  "permissions": ["declarativeNetRequest", "declarativeNetRequestWithHostAccess", "alarms", "storage"],
+  "host_permissions": [
+    "https://comick.dev/*",
+    "https://comick.live/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://comick.dev/comic/*", "https://comick.live/comic/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

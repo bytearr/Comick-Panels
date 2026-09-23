@@ -1,0 +1,24 @@
+#vash-panels {
+  width: 100%;
+  margin: 12px 0 0;
+}
+
+#vash-panels .vash-hoster {
+  display: block;
+  margin: 0 0 12px 12px;
+  min-width: 220px;
+  max-width: calc(100% - 24px);
+  padding: 8px 10px;
+}
+
+#vash-panels .vash-pages {
+  width: min(920px, calc(100% - 24px));
+  margin: 0 auto;
+}
+
+#vash-panels .vash-pages img {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto 8px;
+}
