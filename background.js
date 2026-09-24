@@ -150,8 +150,10 @@ function publishAll(cache, reader) {
 }
 
 function scoreManga(query, manga) {
-  const names = [manga.title, ...(manga.altTitles || [])].filter(Boolean);
-  return names.reduce((best, name) => Math.max(best, scoreTitle(query, name)), 0);
+  const titleScore = scoreTitle(query, manga.title);
+  const altScore = (manga.altTitles || []).reduce((best, name) => Math.max(best, scoreTitle(query, name)), 0);
+  if (titleScore >= altScore) return titleScore;
+  return Math.max(0, altScore - 1);
 }
 
 function searchQueries(title, titles) {
