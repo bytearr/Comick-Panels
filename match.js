@@ -12,17 +12,38 @@ export function titleWords(value) {
   return normTitle(value).split(" ").filter((word) => word.length > 2 && !STOP.has(word));
 }
 
-function sameWord(left, right) {
-  return left === right || left.startsWith(right) || right.startsWith(left);
+export const MIN_SCORE = 75;
+
+function wordSet(value) {
+  return new Set(titleWords(value));
 }
 
+// Exact normalized titles always match. Otherwise both sides have to share
+// at least three whole words, and the shorter title has to be mostly the
+// same words as the longer one. "heroes" does not match "hero".
 export function scoreTitle(query, title) {
-  const wanted = titleWords(query);
-  const found = titleWords(title);
-  if (!wanted.length || !found.length) return 0;
-  if (normTitle(query) === normTitle(title)) return 100;
-  const hits = wanted.filter((word) => found.some((other) => sameWord(word, other))).length;
-  return Math.round((100 * hits) / wanted.length);
+  const left = normTitle(query);
+  const right = normTitle(title);
+  if (!left || !right) return 0;
+  if (left === right) return 100;
+  const wanted = wordSet(query);
+  const found = wordSet(title);
+  if (!wanted.size || !found.size) return 0;
+  let shared = 0;
+  for (const word of wanted) if (found.has(word)) shared += 1;
+  if (shared < 3) return 0;
+  const overlap = Math.min(shared / wanted.size, shared / found.size);
+  return Math.round(100 * overlap);
+}
+
+export function scoreManga(query, manga) {
+  const titleScore = scoreTitle(query, manga && manga.title);
+  const altScore = ((manga && manga.altTitles) || []).reduce(
+    (best, name) => Math.max(best, scoreTitle(query, name)),
+    0
+  );
+  if (titleScore >= altScore) return titleScore;
+  return Math.max(0, altScore - 1);
 }
 
 export function sameChapter(wanted, number) {

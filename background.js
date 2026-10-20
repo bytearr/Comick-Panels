@@ -1,8 +1,7 @@
-import { sameChapter, scoreTitle, titleWords } from "./match.js";
+import { MIN_SCORE, sameChapter, scoreManga, titleWords } from "./match.js";
 import { sources } from "./parsers/index.js";
 
-const MIN_SCORE = 75;
-
+const CACHE = "manga2:";
 const caches = new Map();
 const referers = new Map();
 let catalog = null;
@@ -68,7 +67,7 @@ async function persist(cache) {
     label: entry.label
   }]);
   await chrome.storage.local.set({
-    ["manga:" + cache.slug]: {
+    [CACHE + cache.slug]: {
       title: cache.title,
       titles: cache.titles || [],
       entries,
@@ -92,8 +91,8 @@ async function cacheFor(slug, title) {
     scanning: false,
     readers: new Set()
   };
-  const stored = await chrome.storage.local.get("manga:" + slug);
-  const saved = stored["manga:" + slug];
+  const stored = await chrome.storage.local.get(CACHE + slug);
+  const saved = stored[CACHE + slug];
   if (saved) {
     cache.title = title || saved.title || "";
     cache.titles = Array.isArray(saved.titles) ? saved.titles : [];
@@ -149,11 +148,13 @@ function publishAll(cache, reader) {
   ));
 }
 
-function scoreManga(query, manga) {
-  const titleScore = scoreTitle(query, manga.title);
-  const altScore = (manga.altTitles || []).reduce((best, name) => Math.max(best, scoreTitle(query, name)), 0);
-  if (titleScore >= altScore) return titleScore;
-  return Math.max(0, altScore - 1);
+function acceptingNames(queries) {
+  const long = queries.filter((query) => titleWords(query).length >= 3);
+  return long.length ? long : queries;
+}
+
+function bestScore(queries, manga) {
+  return acceptingNames(queries).reduce((best, query) => Math.max(best, scoreManga(query, manga)), 0);
 }
 
 function searchQueries(title, titles) {
@@ -181,7 +182,7 @@ async function learn(source, queries) {
       continue;
     }
     const ranked = (searched || [])
-      .map((manga) => ({ manga, score: scoreManga(query, manga) }))
+      .map((manga) => ({ manga, score: bestScore(queries, manga) }))
       .filter((row) => row.score >= MIN_SCORE)
       .sort((a, b) => b.score - a.score);
     const best = ranked[0];
@@ -282,7 +283,7 @@ async function dropClosed() {
   for (const slug of caches.keys()) {
     if (open.has(slug)) continue;
     caches.delete(slug);
-    chrome.storage.local.remove("manga:" + slug);
+    chrome.storage.local.remove(CACHE + slug);
   }
 }
 

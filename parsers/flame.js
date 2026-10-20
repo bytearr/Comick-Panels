@@ -1,3 +1,4 @@
+import { MIN_SCORE, scoreManga } from "../match.js";
 import { getJson, getText } from "./http.js";
 
 const ORIGIN = "https://flamecomics.xyz";
@@ -36,7 +37,7 @@ export const flame = {
       title: series.title || "",
       altTitles: altTitles(series.altTitles),
       url: `${ORIGIN}/series/${series.series_id}`
-    }));
+    })).filter((series) => scoreManga(query, series) >= MIN_SCORE);
   },
 
   async details(manga) {
