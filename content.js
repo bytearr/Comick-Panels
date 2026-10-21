@@ -204,6 +204,7 @@ function connect(refresh = false) {
       if (message.type === "error") { state = "done"; setStatus(message.error); }
       if (message.type === "status" && message.state === "done") {
         state = "done";
+        if (!hits.size) root?.querySelector(".vash-pages").replaceChildren();
         const errors = Array.isArray(message.errors) ? message.errors : [];
         const summary = hits.size ? `${hits.size} chapter version${hits.size === 1 ? "" : "s"} available.` : "No matching chapter found. Try refreshing sources.";
         setStatus(summary + (errors.length ? ` ${errors.length} source${errors.length === 1 ? "" : "s"} failed: ${errors.join("; ")}` : ""));

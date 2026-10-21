@@ -36,3 +36,24 @@ test("FlameComics rediscovers its Next.js build after a 404", async (t) => {
   assert.equal(homes, 2);
   assert.ok(requests.some((url) => url.includes("/new/browse.json")));
 });
+
+test("Flame missing series share a build check and do not retry an unchanged build", async (t) => {
+  const { flame } = await import("../parsers/flame.js?missing-series");
+  let homes = 0;
+  const paths = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    if (url === "https://flamecomics.xyz/") {
+      homes++;
+      return new Response("/_next/static/current/_buildManifest.js");
+    }
+    paths.push(url);
+    if (url.endsWith("browse.json")) return Response.json({ pageProps: { series: [] } });
+    return new Response("", { status: 404 });
+  });
+  await flame.search("Berserk");
+  const results = await Promise.allSettled([flame.details({ id: "missing-a" }), flame.details({ id: "missing-b" })]);
+  assert.ok(results.every((result) => result.status === "rejected"));
+  await assert.rejects(flame.details({ id: "missing-c" }), /HTTP 404/);
+  assert.equal(homes, 2, "one initial discovery and one shared recheck");
+  assert.equal(paths.filter((url) => url.includes("/series/")).length, 3, "one JSON request per missing series");
+});

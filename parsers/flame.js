@@ -4,24 +4,39 @@ import { getJson, getText } from "./http.js";
 const ORIGIN = "https://flamecomics.xyz";
 let buildId = "";
 
-async function prefix() {
-  if (buildId) return buildId;
-  const html = await getText(`${ORIGIN}/`);
-  const match = html.match(/_next\/static\/([^/]+)\/_buildManifest\.js/);
-  if (!match) throw new Error("Flame build id missing");
-  buildId = match[1];
-  return buildId;
+let buildRequest = null;
+let lastBuildCheck = -Infinity;
+const BUILD_CHECK_INTERVAL = 60 * 1000;
+
+async function prefix(force = false) {
+  if (buildRequest) return buildRequest;
+  if (buildId && !force) return buildId;
+  buildRequest = (async () => {
+    const html = await getText(`${ORIGIN}/`);
+    const match = html.match(/_next\/static\/([^/]+)\/_buildManifest\.js/);
+    if (!match) throw new Error("Flame build id missing");
+    // Keep the known id until discovery succeeds, including on network errors.
+    buildId = match[1];
+    return buildId;
+  })();
+  try { return await buildRequest; } finally { buildRequest = null; }
 }
 
-// Next.js deploys invalidate the old build-specific JSON routes.
+// A 404 may be a missing series, not a deployment. Share and rate-limit
+// homepage checks; only retry JSON when a different build was discovered.
 async function pageData(path) {
   const id = await prefix();
   try {
     return await getJson(`${ORIGIN}/_next/data/${id}/${path}`);
   } catch (error) {
     if (!/HTTP 404\b/.test(error.message)) throw error;
-    if (buildId === id) buildId = "";
-    const fresh = await prefix();
+    let fresh = buildId;
+    if (buildRequest) fresh = await buildRequest;
+    else if (buildId === id && Date.now() - lastBuildCheck >= BUILD_CHECK_INTERVAL) {
+      lastBuildCheck = Date.now();
+      fresh = await prefix(true);
+    }
+    if (fresh === id) throw error;
     return getJson(`${ORIGIN}/_next/data/${fresh}/${path}`);
   }
 }

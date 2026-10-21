@@ -102,7 +102,7 @@ async function learn(source, queries) {
     try {
       const searched = await source.search(query);
       const ranked = (searched || []).map((manga) => ({
-        manga, score: Math.max(...queries.map((name) => scoreManga(name, manga)))
+        manga, score: scoreManga(query, manga)
       })).filter((row) => row.score >= MIN_SCORE).sort((a, b) => b.score - a.score);
       // A dead first result should not hide another equally plausible edition.
       for (const candidate of ranked.slice(0, 3)) {
@@ -128,7 +128,7 @@ async function entryFor(cache, source) {
     let entry;
     if (current) {
       const manga = await source.details(current.manga);
-      if (!Array.isArray(manga?.chapters)) throw new Error("Invalid chapter list");
+      if (!Array.isArray(manga?.chapters) || !manga.chapters.length) throw new Error("Empty or invalid chapter list");
       entry = { manga, chapters: manga.chapters, label: current.label, updatedAt: Date.now() };
     } else entry = await learn(source, searchQueries(cache.title, cache.titles));
     if (entry) cache.entries.set(source.id, entry);
@@ -253,7 +253,7 @@ async function prune() {
   for (const [slug, cache] of caches) {
     if (!cache.readers.size && !cache.jobs.size) {
       await cache.writes?.catch(() => {});
-      caches.delete(slug);
+      if (!cache.readers.size && !cache.jobs.size && caches.get(slug) === cache) caches.delete(slug);
     }
   }
 }

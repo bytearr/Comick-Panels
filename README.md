@@ -18,7 +18,7 @@ Nothing else has to be installed. There is no app, no Java process, and no build
 
 A toolbar above the ComicK pages shows search progress and a dropdown of matching chapter versions, including their page counts. The last source you explicitly pick is preferred on the next chapter in the same tab. New scanlation groups do not interrupt your current selection.
 
-- **Refresh sources** searches the series again and reloads image URLs without clearing extension data. Existing pages stay visible until a replacement arrives.
+- **Refresh sources** searches the series again and reloads image URLs without clearing extension data. Existing pages stay visible during the search; they are cleared if the completed search finds no matching version.
 - Failed images have a **retry image** button. If a signed URL expired, use **Refresh sources** instead.
 - The first two images load immediately; later pages use browser-native lazy loading.
 - Source failures are listed in the toolbar; working sources remain available.
@@ -58,7 +58,7 @@ npm test
 npm run check
 ```
 
-Tests exercise matching, source response fixtures, cache expiry, concurrent readers, disconnected ports, SPA navigation, source selection, and refresh/retry controls. They use mocked network/Chrome APIs and a minimal DOM fixture; they do not establish live provider availability or Chrome rendering correctness. GitHub Actions runs the tests on pushes and pull requests.
+Tests exercise matching, source response fixtures, cache expiry, concurrent readers, disconnected ports, SPA navigation, source selection, and refresh/retry controls. They use mocked network/Chrome APIs and a minimal DOM fixture; they do not establish live provider availability or Chrome rendering correctness. GitHub Actions runs the tests on pushes and pull requests on Ubuntu and Windows (with CRLF checkout).
 
 Before releasing, load the extension in Chrome/Brave and check:
 

@@ -119,3 +119,12 @@ test("content and background agree on decimal chapter URL parsing", () => {
     assert.equal(vm.runInContext("chapterFromPath(input)", app.context), chapterFromPath(path));
   }
 });
+
+test("refresh keeps old images only until a zero-hit search finishes", async () => {
+  const app = setup(); await app.settle(); app.hit(0);
+  app.root().querySelector(".vash-refresh").emit("click");
+  assert.ok(app.root().querySelector("img"));
+  app.ports[1].onMessage.emit({ type: "status", state: "done", errors: [] });
+  assert.equal(app.root().querySelector("img"), null);
+  assert.match(app.root().querySelector(".vash-status").textContent, /No matching chapter/);
+});
