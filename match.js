@@ -2,8 +2,10 @@ const STOP = new Set(["the", "and", "with", "for", "from", "that", "this", "its"
 
 export function normTitle(value) {
   return String(value || "")
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -47,18 +49,13 @@ export function scoreManga(query, manga) {
 }
 
 export function sameChapter(wanted, number) {
+  if (number == null || String(number).trim() === "") return false;
   const chapter = Number(number);
   return Number.isFinite(wanted) && Number.isFinite(chapter) && Math.abs(chapter - wanted) < 0.001;
 }
 
 export function chapterFromPath(pathname) {
-  const raw = String(pathname || "");
-  const at = raw.toLowerCase().lastIndexOf("chapter-");
-  if (at < 0) return null;
-  const segs = raw.slice(at + "chapter-".length).split(/[/?#]/)[0].split("-").filter(Boolean);
-  if (!/^\d+$/.test(segs[0] || "")) return null;
-  if (/^\d+$/.test(segs[1] || "") && (!segs[2] || /^[a-z]{2}$/i.test(segs[2]))) {
-    return Number(`${segs[0]}.${segs[1]}`);
-  }
-  return Number(segs[0]);
+  const segment = String(pathname || "").split(/[?#]/)[0].split("/").filter(Boolean).at(-1) || "";
+  const match = segment.match(/(?:^|-)chapter-(\d+(?:[.-]\d+)?)(?=-[a-z]{2}(?:$|[/?#])|$|[/?#])/i);
+  return match ? Number(match[1].replace("-", ".")) : null;
 }

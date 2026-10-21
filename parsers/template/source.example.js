@@ -9,9 +9,10 @@
 // search runs with the ComicK series title. A score of 75 or higher on `title`
 // or any `altTitles` entry is a hit. Return [] when the series is not on the site.
 // Throw only when the request itself failed. A throw is retried. [] is remembered
-// as a miss for that series.
+// as a miss for ten minutes (or until the reader clicks Refresh sources).
 //
-// Chapter `number` is a finite float. 12.5 matches 12.5 only.
+// Chapter `number` is a finite float. 12.5 matches 12.5 only. Zero is valid.
+// Skip missing/blank chapter numbers before Number(...), which coerces them to 0.
 // `origin` is sent as the Referer on the page images.
 // The service worker has no DOMParser. Read JSON, or pull fields out of HTML with
 // a regex. fetch cannot set User-Agent.
@@ -63,7 +64,7 @@ export const example = {
     void chapter;
     void manga;
     // const data = await getJson(chapter.url);
-    // return data.images.filter((url) => url.startsWith("http"));
+    // return data.images.filter((url) => url.startsWith("https://"));
     return [];
   }
 };

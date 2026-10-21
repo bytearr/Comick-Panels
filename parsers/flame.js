@@ -13,6 +13,19 @@ async function prefix() {
   return buildId;
 }
 
+// Next.js deploys invalidate the old build-specific JSON routes.
+async function pageData(path) {
+  const id = await prefix();
+  try {
+    return await getJson(`${ORIGIN}/_next/data/${id}/${path}`);
+  } catch (error) {
+    if (!/HTTP 404\b/.test(error.message)) throw error;
+    if (buildId === id) buildId = "";
+    const fresh = await prefix();
+    return getJson(`${ORIGIN}/_next/data/${fresh}/${path}`);
+  }
+}
+
 function altTitles(value) {
   if (!value) return [];
   if (Array.isArray(value)) return value.filter((title) => typeof title === "string");
@@ -30,8 +43,7 @@ export const flame = {
   origin: ORIGIN,
 
   async search(query) {
-    const id = await prefix();
-    const data = await getJson(`${ORIGIN}/_next/data/${id}/browse.json`);
+    const data = await pageData("browse.json");
     return ((data.pageProps && data.pageProps.series) || []).map((series) => ({
       id: series.series_id,
       title: series.title || "",
@@ -41,11 +53,10 @@ export const flame = {
   },
 
   async details(manga) {
-    const id = await prefix();
-    const data = await getJson(`${ORIGIN}/_next/data/${id}/series/${manga.id}.json?id=${manga.id}`);
+    const data = await pageData(`series/${manga.id}.json?id=${manga.id}`);
     const chapters = ((data.pageProps && data.pageProps.chapters) || []).map((chapter) => ({
       id: chapter.chapter_id,
-      number: Number(chapter.chapter),
+      number: chapter.chapter == null || String(chapter.chapter).trim() === "" ? NaN : Number(chapter.chapter),
       title: chapter.title || "",
       token: chapter.token,
       seriesId: manga.id
@@ -61,9 +72,8 @@ export const flame = {
   },
 
   async pages(chapter) {
-    const id = await prefix();
-    const data = await getJson(
-      `${ORIGIN}/_next/data/${id}/series/${chapter.seriesId}/${chapter.token}.json?id=${chapter.seriesId}&token=${chapter.token}`
+    const data = await pageData(
+      `series/${chapter.seriesId}/${chapter.token}.json?id=${chapter.seriesId}&token=${chapter.token}`
     );
     const images = (data.pageProps && data.pageProps.chapter && data.pageProps.chapter.images) || {};
     return Object.entries(images)

@@ -1,3 +1,5 @@
+import { getJson } from "./http.js";
+
 function slugFromSeries(url) {
   try {
     const parts = new URL(url, "https://vortexscans.org").pathname.split("/").filter(Boolean);
@@ -16,12 +18,6 @@ function chapterSlug(chapter) {
     if (last.startsWith("chapter-")) return last;
   } catch { /* number fallback */ }
   return `chapter-${chapter.number}`;
-}
-
-async function getJson(url) {
-  const response = await fetch(url, { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`${response.status} ${url}`);
-  return response.json();
 }
 
 export function vtheme({ id, label, origin }) {
