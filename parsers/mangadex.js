@@ -46,6 +46,7 @@ export const mangadex = {
       const data = await getJson(url);
       const rows = data.data || [];
       for (const row of rows) {
+        if (row.attributes.chapter == null || String(row.attributes.chapter).trim() === "") continue;
         const number = Number(row.attributes.chapter);
         if (!Number.isFinite(number)) continue;
         if (!row.attributes.pages) continue;
@@ -72,6 +73,7 @@ export const mangadex = {
   async pages(chapter) {
     const data = await getJson(`${API}/at-home/server/${chapter.id}`);
     const body = data.chapter || {};
+    if (!data.baseUrl || !body.hash) return [];
     const files = body.data && body.data.length ? body.data : body.dataSaver || [];
     const mode = body.data && body.data.length ? "data" : "data-saver";
     return files.map((file) => `${data.baseUrl}/${mode}/${body.hash}/${file}`);

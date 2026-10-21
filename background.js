@@ -1,304 +1,277 @@
-import { MIN_SCORE, sameChapter, scoreManga, titleWords } from "./match.js";
+import { MIN_SCORE, sameChapter, scoreManga } from "./match.js";
 import { sources } from "./parsers/index.js";
 
-const CACHE = "manga2:";
+const CACHE = "manga3:";
+const CHAPTER_TTL = 15 * 60 * 1000;
+const MISS_TTL = 10 * 60 * 1000;
+const PAGE_TTL = 5 * 60 * 1000;
+const MAX_SERIES = 30;
 const caches = new Map();
-const referers = new Map();
-let catalog = null;
+const loading = new Map();
+let ruleQueue = Promise.resolve();
 
-function absolute(url, base) {
-  try {
-    return new URL(url, base).href;
-  } catch {
-    return "";
-  }
+function send(reader, message) {
+  if (!reader.active) return;
+  try { reader.port.postMessage(message); } catch { reader.active = false; }
 }
 
-function slugFromUrl(url) {
-  try {
-    const parts = new URL(url).pathname.split("/").filter(Boolean);
-    const index = parts.indexOf("comic");
-    return index >= 0 ? decodeURIComponent(parts[index + 1] || "") : "";
-  } catch {
-    return "";
-  }
-}
-
-function orderedSources() {
-  if (catalog) return catalog;
-  catalog = sources;
-  return catalog;
-}
-
-async function noteReferer(hit) {
-  let referer = hit.referer;
-  if (!referer || !referer.startsWith("http")) return;
-  if (!referer.endsWith("/")) referer += "/";
-  let changed = false;
-  for (const page of hit.pages) {
-    let host = "";
-    try { host = new URL(page).host; } catch { host = ""; }
-    if (!host || referers.get(host) === referer) continue;
-    referers.set(host, referer);
-    changed = true;
-  }
-  if (!changed) return;
-  const rules = [...referers.entries()].slice(0, 90).map(([host, value], index) => ({
-    id: index + 1,
-    priority: 1,
-    action: {
-      type: "modifyHeaders",
-      requestHeaders: [{ header: "referer", operation: "set", value }]
-    },
-    condition: { urlFilter: `||${host}/`, resourceTypes: ["image"] }
-  }));
-  const existing = await chrome.declarativeNetRequest.getDynamicRules();
-  await chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: existing.map((rule) => rule.id),
-    addRules: rules
+// Session rules disappear when the browser closes. Serialize read/modify/write
+// so simultaneous sources/tabs cannot overwrite each other's referers.
+function noteReferer(hit, tabId) {
+  if (!Number.isInteger(tabId) || tabId < 0) return Promise.resolve();
+  const job = ruleQueue.catch(() => {}).then(async () => {
+    const existing = await chrome.declarativeNetRequest.getSessionRules();
+    const previous = existing.filter((rule) =>
+      rule.condition.tabIds?.includes(tabId) && rule.action.requestHeaders?.[0]?.value === hit.referer
+    );
+    const domains = [...new Set([
+      ...previous.flatMap((rule) => rule.condition.requestDomains || []),
+      ...hit.pages.map((page) => new URL(page).hostname)
+    ])];
+    const kept = existing.filter((rule) => !(
+      rule.condition.tabIds?.includes(tabId) && rule.action.requestHeaders?.[0]?.value === hit.referer
+    ));
+    let id = 1;
+    const used = new Set(kept.map((rule) => rule.id));
+    while (used.has(id)) id += 1;
+    const rule = {
+      id, priority: 1,
+      action: { type: "modifyHeaders", requestHeaders: [{ header: "referer", operation: "set", value: hit.referer }] },
+      condition: { requestDomains: domains, tabIds: [tabId], resourceTypes: ["image"] }
+    };
+    // Bound rule count while retaining the most recently used source/tab rules.
+    const next = [...kept, rule].slice(-90);
+    await chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: existing.map((item) => item.id), addRules: next
+    });
   });
+  ruleQueue = job;
+  return job;
 }
 
-async function persist(cache) {
-  const entries = [...cache.entries.entries()].map(([id, entry]) => [id, {
-    manga: entry.manga,
-    chapters: entry.chapters,
-    pages: entry.pages || {},
-    label: entry.label
-  }]);
-  await chrome.storage.local.set({
-    [CACHE + cache.slug]: {
-      title: cache.title,
-      titles: cache.titles || [],
-      entries,
-      misses: [...cache.misses]
-    }
+function persist(cache) {
+  cache.writes = (cache.writes || Promise.resolve()).catch(() => {}).then(() => {
+    const entries = [...cache.entries].map(([id, entry]) => [id, {
+      manga: entry.manga, chapters: entry.chapters, label: entry.label, updatedAt: entry.updatedAt
+    }]);
+    // Signed image URLs are deliberately memory-only and short-lived.
+    return chrome.storage.local.set({ [CACHE + cache.slug]: {
+      title: cache.title, titles: cache.titles, entries,
+      misses: [...cache.misses], accessedAt: Date.now()
+    } });
   });
+  return cache.writes;
 }
 
 async function cacheFor(slug, title) {
-  if (caches.has(slug)) {
-    const existing = caches.get(slug);
-    if (title) existing.title = title;
-    return existing;
-  }
-  const cache = {
-    slug,
-    title: title || "",
-    titles: [],
-    entries: new Map(),
-    misses: new Set(),
-    scanning: false,
-    readers: new Set()
-  };
-  const stored = await chrome.storage.local.get(CACHE + slug);
-  const saved = stored[CACHE + slug];
-  if (saved) {
-    cache.title = title || saved.title || "";
-    cache.titles = Array.isArray(saved.titles) ? saved.titles : [];
-    for (const [id, entry] of saved.entries || []) cache.entries.set(id, entry);
-    for (const id of saved.misses || []) cache.misses.add(id);
-  }
-  caches.set(slug, cache);
-  return cache;
-}
-
-async function loadPages(source, chapter, entry) {
-  const urls = await source.pages(chapter, entry.manga);
-  return (urls || []).filter((url) => typeof url === "string" && url.startsWith("http"));
-}
-
-async function publishEntry(cache, sourceId, entry, reader) {
-  const source = orderedSources().find((item) => item.id === sourceId);
-  if (!source) return;
-  const rows = (entry.chapters || []).filter((chapter) => sameChapter(reader.chapter, chapter.number));
-  for (const row of rows) {
-    if (!reader.port) return;
-    const key = String(row.id);
-    entry.pages = entry.pages || {};
-    entry.inflight = entry.inflight || {};
-    if (!entry.pages[key]) {
-      if (!entry.inflight[key]) {
-        entry.inflight[key] = loadPages(source, row, entry).finally(() => {
-          delete entry.inflight[key];
-        });
+  if (caches.has(slug)) return caches.get(slug);
+  if (loading.has(slug)) return loading.get(slug);
+  const pending = (async () => {
+    const cache = { slug, title, titles: [], entries: new Map(), misses: new Map(), jobs: new Map(), readers: new Set() };
+    const stored = await chrome.storage.local.get(CACHE + slug);
+    const saved = stored[CACHE + slug];
+    if (saved) {
+      cache.title = title || saved.title || "";
+      cache.titles = Array.isArray(saved.titles) ? saved.titles : [];
+      for (const [id, entry] of saved.entries || []) {
+        if (entry?.manga && Array.isArray(entry.chapters)) cache.entries.set(id, entry);
       }
-      entry.pages[key] = await entry.inflight[key];
-      await persist(cache);
+      for (const [id, time] of saved.misses || []) cache.misses.set(id, time);
     }
-    const urls = entry.pages[key];
-    if (!urls || !urls.length) continue;
-    const extra = row.scanlator || row.branch || "";
-    const hit = {
-      id: `${sourceId}:${row.id}`,
-      source: sourceId,
-      chapter: row.number,
-      label: extra ? `${entry.label} · ${extra}` : entry.label,
-      referer: absolute("/", source.origin || entry.manga.publicUrl || entry.manga.url),
-      pages: urls
-    };
-    try { await noteReferer(hit); } catch { /* the panel can still load */ }
-    try { reader.port.postMessage({ type: "hit", hit }); } catch { /* tab closed */ }
-  }
-}
-
-function publishAll(cache, reader) {
-  return Promise.all([...cache.entries].map(([id, entry]) =>
-    publishEntry(cache, id, entry, reader).catch(() => {})
-  ));
-}
-
-function acceptingNames(queries) {
-  const long = queries.filter((query) => titleWords(query).length >= 3);
-  return long.length ? long : queries;
-}
-
-function bestScore(queries, manga) {
-  return acceptingNames(queries).reduce((best, query) => Math.max(best, scoreManga(query, manga)), 0);
+    caches.set(slug, cache);
+    return cache;
+  })();
+  loading.set(slug, pending);
+  try { return await pending; } finally { loading.delete(slug); }
 }
 
 function searchQueries(title, titles) {
   const seen = new Set();
-  const queries = [];
-  for (const name of [title, ...(titles || [])]) {
-    const clean = String(name || "").replace(/\s+/g, " ").trim();
-    const key = clean.toLowerCase();
-    if (!clean || seen.has(key) || !titleWords(clean).length) continue;
-    seen.add(key);
-    queries.push(clean);
-    if (queries.length >= 8) break;
-  }
-  return queries;
+  return [title, ...(titles || [])].map((name) => String(name || "").replace(/\s+/g, " ").trim())
+    .filter((name) => {
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 8);
 }
 
 async function learn(source, queries) {
-  let failed = 0;
+  let failure = null;
   for (const query of queries) {
-    let searched;
     try {
-      searched = await source.search(query);
-    } catch {
-      failed += 1;
-      continue;
-    }
-    const ranked = (searched || [])
-      .map((manga) => ({ manga, score: bestScore(queries, manga) }))
-      .filter((row) => row.score >= MIN_SCORE)
-      .sort((a, b) => b.score - a.score);
-    const best = ranked[0];
-    if (!best) continue;
-    const manga = await source.details(best.manga);
-    if (!manga || !manga.chapters) continue;
-    return {
-      manga,
-      chapters: manga.chapters,
-      pages: {},
-      label: source.label || source.id
-    };
+      const searched = await source.search(query);
+      const ranked = (searched || []).map((manga) => ({
+        manga, score: scoreManga(query, manga)
+      })).filter((row) => row.score >= MIN_SCORE).sort((a, b) => b.score - a.score);
+      // A dead first result should not hide another equally plausible edition.
+      for (const candidate of ranked.slice(0, 3)) {
+        try {
+          const manga = await source.details(candidate.manga);
+          if (!manga || !Array.isArray(manga.chapters) || !manga.chapters.length) continue;
+          return { manga, chapters: manga.chapters, label: source.label || source.id, updatedAt: Date.now() };
+        } catch (error) { failure = error; }
+      }
+    } catch (error) { failure = error; }
   }
-  if (failed === queries.length && queries.length) throw new Error("search failed");
+  // A partial network failure is not a definitive "no matching title".
+  if (failure) throw failure;
   return null;
 }
 
-async function useTitles(cache, titles) {
-  const next = Array.isArray(titles) ? titles : [];
-  const before = searchQueries(cache.title, cache.titles).join("\n");
-  cache.titles = next;
-  if (before === searchQueries(cache.title, cache.titles).join("\n")) return;
-  cache.misses.clear();
-  await persist(cache);
+async function entryFor(cache, source) {
+  const current = cache.entries.get(source.id);
+  if (current && Date.now() - current.updatedAt < CHAPTER_TTL) return current;
+  if (Date.now() - cache.misses.get(source.id) < MISS_TTL) return null;
+  if (cache.jobs.has(source.id)) return cache.jobs.get(source.id);
+  const job = (async () => {
+    let entry;
+    if (current) {
+      const manga = await source.details(current.manga);
+      if (!Array.isArray(manga?.chapters) || !manga.chapters.length) throw new Error("Empty or invalid chapter list");
+      entry = { manga, chapters: manga.chapters, label: current.label, updatedAt: Date.now() };
+    } else entry = await learn(source, searchQueries(cache.title, cache.titles));
+    if (entry) cache.entries.set(source.id, entry);
+    else cache.misses.set(source.id, Date.now());
+    await persist(cache).catch(() => {}); // Storage quota must not prevent reading.
+    return entry;
+  })();
+  cache.jobs.set(source.id, job);
+  try { return await job; } finally { cache.jobs.delete(source.id); }
 }
 
-async function scan(cache) {
-  if (cache.scanning) return;
-  cache.scanning = true;
-  try {
-    const list = orderedSources();
-    await pool(list, 4, async (source) => {
-      if (cache.entries.has(source.id) || cache.misses.has(source.id)) return;
-      let learned = null;
-      try {
-        learned = await learn(source, searchQueries(cache.title, cache.titles));
-      } catch {
-        return;
+async function publishEntry(source, entry, reader) {
+  const rows = entry.chapters.filter((row) => sameChapter(reader.chapter, row.number));
+  let failure = null;
+  for (const row of rows) {
+    if (!reader.active) return;
+    try {
+      const key = String(row.id);
+      entry.pages ||= new Map();
+      entry.inflight ||= new Map();
+      let pages = entry.pages.get(key);
+      if (!pages || Date.now() - pages.time >= PAGE_TTL) {
+        if (!entry.inflight.has(key)) {
+          const job = Promise.resolve().then(() => source.pages(row, entry.manga)).then((urls) => {
+            const values = [...new Set((urls || []).filter((url) => {
+              try { return typeof url === "string" && new URL(url).protocol === "https:"; } catch { return false; }
+            }))];
+            const result = { urls: values, time: Date.now() };
+            if (values.length) entry.pages.set(key, result);
+            return result;
+          }).finally(() => entry.inflight.delete(key));
+          entry.inflight.set(key, job);
+        }
+        pages = await entry.inflight.get(key);
       }
-      if (!learned) {
-        cache.misses.add(source.id);
-        await persist(cache);
-        return;
-      }
-      cache.entries.set(source.id, learned);
-      await persist(cache);
-      await Promise.all([...cache.readers].map((reader) =>
-        publishEntry(cache, source.id, learned, reader).catch(() => {})
-      ));
-    });
-  } catch (error) {
-    const text = error.message || "Parser failed";
-    for (const reader of cache.readers) {
-      try { reader.port.postMessage({ type: "error", error: text }); } catch { /* tab closed */ }
-    }
-  } finally {
-    cache.scanning = false;
+      if (!pages.urls.length) continue;
+      if (!reader.active) return;
+      const extra = row.scanlator || row.branch || "";
+      const hit = {
+        id: `${source.id}:${row.id}`, source: source.id, chapter: Number(row.number),
+        label: extra ? `${entry.label} · ${extra}` : entry.label,
+        referer: new URL("/", source.origin || entry.manga.publicUrl || entry.manga.url).href,
+        pages: pages.urls
+      };
+      try { await noteReferer(hit, reader.tabId); } catch { /* Images may still load without a referer. */ }
+      send(reader, { type: "hit", hit });
+    } catch (error) { failure = error; }
   }
+  if (failure) throw failure;
 }
 
 async function pool(items, limit, fn) {
   let cursor = 0;
-  async function worker() {
-    while (cursor < items.length) {
-      const index = cursor;
-      cursor += 1;
-      await fn(items[index]);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) await fn(items[cursor++]);
+  }));
 }
 
-chrome.alarms.clear("stop-parser");
+async function runReader(cache, reader) {
+  send(reader, { type: "status", state: "searching" });
+  const errors = [];
+  await pool(sources, 4, async (source) => {
+    if (!reader.active) return;
+    try {
+      const entry = await entryFor(cache, source);
+      if (entry && reader.active) await publishEntry(source, entry, reader);
+    } catch (error) { errors.push(`${source.label}: ${error.message || "Request failed"}`); }
+  });
+  send(reader, { type: "status", state: "done", errors });
+}
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "find") return;
+  let reader = null;
+  let cache = null;
+  let disconnected = false;
+  let generation = 0;
+  const detach = () => {
+    if (reader) { reader.active = false; cache?.readers.delete(reader); }
+  };
+  port.onDisconnect.addListener(() => { disconnected = true; generation += 1; detach(); });
   port.onMessage.addListener(async (message) => {
+    const mine = ++generation;
+    detach();
     try {
-      if (!message || !message.slug || message.chapter == null) return;
-      const cache = await cacheFor(message.slug, message.title);
-      await useTitles(cache, message.titles);
-      const reader = { port, chapter: message.chapter };
-      cache.readers.add(reader);
-      port.onDisconnect.addListener(() => cache.readers.delete(reader));
-      publishAll(cache, reader);
-      scan(cache);
+      if (!message || typeof message.slug !== "string" || !message.slug || !Number.isFinite(message.chapter)) return;
+      const next = await cacheFor(message.slug, message.title || "");
+      if (disconnected || mine !== generation) return;
+      cache = next;
+      const before = searchQueries(cache.title, cache.titles).join("\n");
+      cache.title = message.title || cache.title;
+      if (Array.isArray(message.titles)) cache.titles = message.titles;
+      if (before !== searchQueries(cache.title, cache.titles).join("\n")) cache.misses.clear();
+      reader = { port, chapter: message.chapter, tabId: port.sender?.tab?.id, active: true };
+      const current = reader;
+      cache.readers.add(current);
+      if (message.refresh) {
+        send(current, { type: "status", state: "searching" });
+        await Promise.allSettled([...cache.jobs.values()]);
+        if (!current.active) return;
+        cache.entries.clear();
+        cache.misses.clear();
+        await persist(cache).catch(() => {});
+      }
+      if (current.active) await runReader(cache, current);
     } catch (error) {
-      try { port.postMessage({ type: "error", error: error.message || "Parser failed" }); } catch { /* tab closed */ }
+      if (!disconnected && mine === generation) {
+        try { port.postMessage({ type: "error", error: error.message || "Parser failed" }); } catch { /* Closed. */ }
+      }
     }
   });
 });
 
-async function dropClosed() {
-  const tabs = await chrome.tabs.query({
-    url: ["https://comick.dev/comic/*", "https://comick.live/comic/*"]
-  });
-  const open = new Set(tabs.map((tab) => slugFromUrl(tab.url)).filter(Boolean));
-  for (const slug of caches.keys()) {
-    if (open.has(slug)) continue;
-    caches.delete(slug);
-    chrome.storage.local.remove(CACHE + slug);
+async function prune() {
+  const saved = await chrome.storage.local.get(null);
+  const active = new Set([...caches].filter(([, cache]) => cache.readers.size).map(([slug]) => CACHE + slug));
+  const rows = Object.keys(saved).filter((key) => key.startsWith(CACHE))
+    .sort((a, b) => (saved[b].accessedAt || 0) - (saved[a].accessedAt || 0));
+  const remove = rows.slice(MAX_SERIES).filter((key) => !active.has(key));
+  remove.push(...Object.keys(saved).filter((key) => key.startsWith("manga2:")));
+  await chrome.storage.local.remove(remove);
+  for (const [slug, cache] of caches) {
+    if (!cache.readers.size && !cache.jobs.size) {
+      await cache.writes?.catch(() => {});
+      if (!cache.readers.size && !cache.jobs.size && caches.get(slug) === cache) caches.delete(slug);
+    }
   }
 }
 
-async function stopIfIdle() {
-  await dropClosed();
-}
-
-function scheduleStop() {
-  chrome.alarms.create("stop-parser", { when: Date.now() + 15000 });
-}
-
-chrome.tabs.onRemoved.addListener(() => scheduleStop());
-chrome.tabs.onUpdated.addListener((_id, info) => {
-  if (info.url) scheduleStop();
-});
+chrome.alarms.create("prune-panels", { periodInMinutes: 5 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "stop-parser") stopIfIdle();
+  if (alarm.name === "prune-panels") prune().catch(() => {});
+});
+// Remove the global image-header rules left by versions before 0.6.
+chrome.declarativeNetRequest.getDynamicRules().then((rules) => {
+  if (rules.length) return chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: rules.map((rule) => rule.id) });
+}).catch(() => {});
+chrome.alarms.clear("stop-parser");
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  ruleQueue = ruleQueue.catch(() => {}).then(async () => {
+    const rules = await chrome.declarativeNetRequest.getSessionRules();
+    const ids = rules.filter((rule) => rule.condition.tabIds?.includes(tabId)).map((rule) => rule.id);
+    if (ids.length) await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: ids });
+  }).catch(() => {});
 });
