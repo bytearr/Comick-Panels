@@ -17,10 +17,11 @@ Nothing else has to be installed. There is no app, no Java process, and no build
 | MangaDex | English chapters only. Group name shows in the dropdown |
 | FlameComics | About 170 series, including finished ones |
 | MangaK | Large catalog (`mangak.io`) |
+| WeebCentral | Long English manhwa catalogs, including chapters the smaller catalogs stop before |
 
 A toolbar above the ComicK pages shows search progress and a dropdown of matching chapter versions, including their page counts. The last source you explicitly pick is preferred on the next chapter in the same tab. New scanlation groups do not interrupt your current selection.
 
-For alternatives to MangaK, select **MangaPill**, **MangaKatana**, or **MangaDex** in the source dropdown when available. MangaDex prefers original files over data-saver images; the new sources use the site's reader images without resizing or recompressing them. Scan quality, chapter numbering and coverage still depend on the provider; a different source does not guarantee a better scan for every chapter. MangaPill group versions are listed separately.
+For alternatives to MangaK, select **MangaPill**, **MangaKatana**, **MangaDex**, or **WeebCentral** in the source dropdown when available. MangaDex prefers original files over data-saver images; the new sources use the site's reader images without resizing or recompressing them. Scan quality, chapter numbering and coverage still depend on the provider; a different source does not guarantee a better scan for every chapter. MangaPill group versions are listed separately.
 
 - **Refresh sources** searches the series again and reloads image URLs without clearing extension data. Existing pages stay visible during the search; they are cleared if the completed search finds no matching version.
 - Failed images have a **retry image** button. If a signed URL expired, use **Refresh sources** instead.

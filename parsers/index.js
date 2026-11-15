@@ -7,6 +7,7 @@ import { mangak } from "./mangak.js";
 import { mangapill } from "./mangapill.js";
 import { mangakatana } from "./mangakatana.js";
 import { vtheme } from "./vtheme.js";
+import { weebcentral } from "./weebcentral.js";
 
 export const sources = [
   mangapill,
@@ -19,5 +20,6 @@ export const sources = [
   likemanga,
   mangadex,
   flame,
-  mangak
+  mangak,
+  weebcentral
 ];
