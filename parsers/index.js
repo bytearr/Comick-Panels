@@ -4,9 +4,13 @@ import { flame } from "./flame.js";
 import { likemanga } from "./likemanga.js";
 import { mangadex } from "./mangadex.js";
 import { mangak } from "./mangak.js";
+import { mangapill } from "./mangapill.js";
+import { mangakatana } from "./mangakatana.js";
 import { vtheme } from "./vtheme.js";
 
 export const sources = [
+  mangapill,
+  mangakatana,
   vtheme({
     id: "VORTEXSCANS",
     label: "VortexScans",
